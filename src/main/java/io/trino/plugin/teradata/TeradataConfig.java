@@ -13,6 +13,21 @@
  */
 package io.trino.plugin.teradata;
 
+import io.airlift.configuration.Config;
+
 public class TeradataConfig
 {
+    private boolean queryBandEnabled;
+
+    public boolean isQueryBandEnabled()
+    {
+        return queryBandEnabled;
+    }
+
+    @Config("teradata.query-band.query-id.enabled")
+    public TeradataConfig setQueryBandEnabled(boolean queryBandEnabled)
+    {
+        this.queryBandEnabled = queryBandEnabled;
+        return this;
+    }
 }

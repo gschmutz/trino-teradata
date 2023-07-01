@@ -29,6 +29,8 @@ import java.sql.DriverManager;
 import java.sql.SQLException;
 import java.util.Properties;
 
+import static io.airlift.configuration.ConfigBinder.configBinder;
+
 public class TeradataClientModule
         extends AbstractConfigurationAwareModule
 {
@@ -36,6 +38,7 @@ public class TeradataClientModule
     public void setup(Binder binder)
     {
         binder.bind(JdbcClient.class).annotatedWith(ForBaseJdbc.class).to(TeradataClient.class).in(Scopes.SINGLETON);
+        configBinder(binder).bindConfig(TeradataConfig.class);
     }
 
     @Provides
