@@ -27,16 +27,24 @@ import io.trino.plugin.jdbc.JdbcJoinCondition;
 import io.trino.plugin.jdbc.JdbcJoinPushdownUtil;
 import io.trino.plugin.jdbc.JdbcSortItem;
 import io.trino.plugin.jdbc.JdbcSplit;
+import io.trino.plugin.jdbc.JdbcStatisticsConfig;
 import io.trino.plugin.jdbc.JdbcTableHandle;
 import io.trino.plugin.jdbc.JdbcTypeHandle;
 import io.trino.plugin.jdbc.LongWriteFunction;
 import io.trino.plugin.jdbc.PreparedQuery;
 import io.trino.plugin.jdbc.QueryBuilder;
 import io.trino.plugin.jdbc.WriteMapping;
+import io.trino.plugin.jdbc.aggregation.ImplementAvgDecimal;
+import io.trino.plugin.jdbc.aggregation.ImplementAvgFloatingPoint;
 import io.trino.plugin.jdbc.aggregation.ImplementCount;
 import io.trino.plugin.jdbc.aggregation.ImplementCountAll;
+import io.trino.plugin.jdbc.aggregation.ImplementCountDistinct;
 import io.trino.plugin.jdbc.aggregation.ImplementMinMax;
+import io.trino.plugin.jdbc.aggregation.ImplementStddevPop;
+import io.trino.plugin.jdbc.aggregation.ImplementStddevSamp;
 import io.trino.plugin.jdbc.aggregation.ImplementSum;
+import io.trino.plugin.jdbc.aggregation.ImplementVariancePop;
+import io.trino.plugin.jdbc.aggregation.ImplementVarianceSamp;
 import io.trino.plugin.jdbc.expression.JdbcConnectorExpressionRewriterBuilder;
 import io.trino.plugin.jdbc.expression.ParameterizedExpression;
 import io.trino.plugin.jdbc.logging.RemoteQueryModifier;
@@ -50,8 +58,10 @@ import io.trino.spi.connector.JoinCondition.Operator;
 import io.trino.spi.connector.JoinStatistics;
 import io.trino.spi.connector.JoinType;
 import io.trino.spi.expression.ConnectorExpression;
+import io.trino.spi.statistics.TableStatistics;
 import io.trino.spi.type.CharType;
 import io.trino.spi.type.DecimalType;
+import io.trino.spi.type.Decimals;
 import io.trino.spi.type.TimestampType;
 import io.trino.spi.type.Type;
 import io.trino.spi.type.VarcharType;
@@ -71,7 +81,13 @@ import java.util.function.BiFunction;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
+import static com.google.common.base.Preconditions.checkArgument;
+import static com.google.common.base.Throwables.throwIfInstanceOf;
 import static com.google.common.base.Verify.verify;
+import static io.trino.plugin.jdbc.DecimalConfig.DecimalMapping.ALLOW_OVERFLOW;
+import static io.trino.plugin.jdbc.DecimalSessionSessionProperties.getDecimalDefaultScale;
+import static io.trino.plugin.jdbc.DecimalSessionSessionProperties.getDecimalRounding;
+import static io.trino.plugin.jdbc.DecimalSessionSessionProperties.getDecimalRoundingMode;
 import static io.trino.plugin.jdbc.JdbcErrorCode.JDBC_ERROR;
 import static io.trino.plugin.jdbc.PredicatePushdownController.FULL_PUSHDOWN;
 import static io.trino.plugin.jdbc.StandardColumnMappings.bigintColumnMapping;
@@ -79,6 +95,7 @@ import static io.trino.plugin.jdbc.StandardColumnMappings.bigintWriteFunction;
 import static io.trino.plugin.jdbc.StandardColumnMappings.charReadFunction;
 import static io.trino.plugin.jdbc.StandardColumnMappings.charWriteFunction;
 import static io.trino.plugin.jdbc.StandardColumnMappings.dateColumnMappingUsingLocalDate;
+import static io.trino.plugin.jdbc.StandardColumnMappings.decimalColumnMapping;
 import static io.trino.plugin.jdbc.StandardColumnMappings.doubleColumnMapping;
 import static io.trino.plugin.jdbc.StandardColumnMappings.doubleWriteFunction;
 import static io.trino.plugin.jdbc.StandardColumnMappings.integerColumnMapping;
@@ -94,6 +111,7 @@ import static io.trino.plugin.jdbc.UnsupportedTypeHandling.CONVERT_TO_VARCHAR;
 import static io.trino.spi.StandardErrorCode.NOT_SUPPORTED;
 import static io.trino.spi.type.BigintType.BIGINT;
 import static io.trino.spi.type.CharType.createCharType;
+import static io.trino.spi.type.DecimalType.createDecimalType;
 import static io.trino.spi.type.DoubleType.DOUBLE;
 import static io.trino.spi.type.IntegerType.INTEGER;
 import static io.trino.spi.type.RealType.REAL;
@@ -101,6 +119,7 @@ import static io.trino.spi.type.SmallintType.SMALLINT;
 import static io.trino.spi.type.VarcharType.createUnboundedVarcharType;
 import static io.trino.spi.type.VarcharType.createVarcharType;
 import static java.lang.Math.max;
+import static java.lang.Math.min;
 import static java.lang.String.format;
 import static java.util.Locale.ENGLISH;
 import static java.util.Objects.requireNonNull;
@@ -111,6 +130,8 @@ public class TeradataClient
     private static final Set<String> INERNAL_SCHEMAS = ImmutableSet.<String>builder()
             .add("dbc")     // dbc contains the data dictionary
             .build();
+
+    private final boolean statisticsEnabled;
     private final AggregateFunctionRewriter<JdbcExpression, ?> aggregateFunctionRewriter;
 
     private final ConnectorExpressionRewriter<ParameterizedExpression> connectorExpressionRewriter;
@@ -118,6 +139,7 @@ public class TeradataClient
     @Inject
     public TeradataClient(
             BaseJdbcConfig config,
+            JdbcStatisticsConfig statisticsConfig,
             TeradataConfig teradataConfig,
             ConnectionFactory connectionFactory,
             QueryBuilder queryBuilder,
@@ -126,18 +148,28 @@ public class TeradataClient
     {
         super("\"", connectionFactory, queryBuilder, config.getJdbcTypesMappedToVarchar(), identifierMapping, remoteQueryModifier, true);
         requireNonNull(teradataConfig, "teradataConfig is null");
+        this.statisticsEnabled = statisticsConfig.isEnabled();
 
         JdbcTypeHandle bigintTypeHandle = new JdbcTypeHandle(Types.BIGINT, Optional.of("bigint"), Optional.empty(), Optional.empty(), Optional.empty(), Optional.empty());
         this.connectorExpressionRewriter = JdbcConnectorExpressionRewriterBuilder.newBuilder()
                 .addStandardRules(this::quoted)
                 .build();
+
         this.aggregateFunctionRewriter = new AggregateFunctionRewriter<>(
                 connectorExpressionRewriter,
                 ImmutableSet.<AggregateFunctionRule<JdbcExpression, ParameterizedExpression>>builder()
                         .add(new ImplementCountAll(bigintTypeHandle))
                         .add(new ImplementCount(bigintTypeHandle))
+                        .add(new ImplementCountDistinct(bigintTypeHandle, false))
                         .add(new ImplementMinMax(false))
                         .add(new ImplementSum(TeradataClient::toTypeHandle))
+                        .add(new ImplementAvgFloatingPoint())
+                        .add(new ImplementAvgDecimal())
+                        .add(new ImplementAvgBigint())
+                        .add(new ImplementStddevSamp())
+                        .add(new ImplementStddevPop())
+                        .add(new ImplementVarianceSamp())
+                        .add(new ImplementVariancePop())
                         .build());
     }
 
@@ -242,6 +274,19 @@ public class TeradataClient
         return Optional.of(new JdbcTypeHandle(Types.NUMERIC, Optional.of("decimal"), Optional.of(decimalType.getPrecision()), Optional.of(decimalType.getScale()), Optional.empty(), Optional.empty()));
     }
 
+    private static Optional<String> asLongDecimal(JdbcExpression jdbcExpression)
+    {
+        JdbcTypeHandle jdbcTypeHandle = jdbcExpression.getJdbcTypeHandle();
+        if (jdbcTypeHandle.getJdbcType() != 2) {
+            return Optional.empty();
+        }
+        else {
+            verify(jdbcTypeHandle.getRequiredColumnSize() == 38, "Expected long decimal, but column size is: %s", jdbcTypeHandle.getRequiredColumnSize());
+            int decimalDigits = jdbcTypeHandle.getRequiredDecimalDigits();
+            return Optional.of(String.format("decimal(38, %s)", decimalDigits));
+        }
+    }
+
     @Override
     protected boolean filterSchema(String schemaName)
     {
@@ -301,6 +346,7 @@ public class TeradataClient
         switch (jdbcTypeName) {
         }
 
+        int decimalDigits;
         switch (typeHandle.getJdbcType()) {
 //            case Types.TINYINT:
 //                return Optional.of(new ColumnMapping(TinyintType.TINYINT, ResultSet::getByte, writeTypedNull(typeHandle.getJdbcType(), StandardColumnMappings.tinyintWriteFunction()), FULL_PUSHDOWN));
@@ -314,6 +360,17 @@ public class TeradataClient
             case Types.BIGINT:
                 return Optional.of(bigintColumnMapping());
 
+            case Types.DECIMAL:
+                int precision = typeHandle.getRequiredColumnSize();
+                decimalDigits = typeHandle.getRequiredDecimalDigits();
+                if (getDecimalRounding(session) == ALLOW_OVERFLOW && precision > Decimals.MAX_PRECISION) {
+                    int scale = min(decimalDigits, getDecimalDefaultScale(session));
+                    return Optional.of(decimalColumnMapping(createDecimalType(Decimals.MAX_PRECISION, scale), getDecimalRoundingMode(session)));
+                }
+                if (precision > Decimals.MAX_PRECISION) {
+                    break;
+                }
+                return Optional.of(decimalColumnMapping(createDecimalType(precision, max(decimalDigits, 0))));
             case Types.REAL:
                 return Optional.of(realColumnMapping());
 
@@ -331,7 +388,7 @@ public class TeradataClient
 
             case Types.TIMESTAMP:
                 if (typeHandle.getJdbcTypeName().isPresent() && !((String) typeHandle.getJdbcTypeName().get()).contains("WITH TIME ZONE")) {
-                    int decimalDigits = typeHandle.getRequiredDecimalDigits();
+                    decimalDigits = typeHandle.getRequiredDecimalDigits();
                     TimestampType timestampType = TimestampType.createTimestampType(decimalDigits);
                     //return Optional.of(timestampColumnMapping(timestampType));
                 }
@@ -451,16 +508,22 @@ public class TeradataClient
     @Override
     protected Optional<TopNFunction> topNFunction()
     {
-        return Optional.of((sql, sortItems, limit) -> {
+        return Optional.of((query, sortItems, limit) -> {
             String start = "SELECT ";
-            verify(sql.startsWith(start), "Expected query to start with %s but query was %s", start, sql);
+            verify(query.startsWith(start), "Expected query to start with %s but query was %s", start, query);
             String orderBy = (String) sortItems.stream().map((sortItem) -> {
                 String ordering = sortItem.getSortOrder().isAscending() ? "ASC" : "DESC";
                 String nullsHandling = sortItem.getSortOrder().isNullsFirst() ? "NULLS FIRST" : "NULLS LAST";
                 return String.format("%s %s %s", this.quoted(sortItem.getColumn().getColumnName()), ordering, nullsHandling);
             }).collect(Collectors.joining(", "));
-            return format("SELECT TOP %d * FROM (%s) o ORDER BY %s ", limit, sql, orderBy);
+            return String.format("SELECT TOP %d %s ORDER BY %s", limit, query.substring(start.length()), orderBy);
         });
+    }
+
+    @Override
+    public boolean isTopNGuaranteed(ConnectorSession session)
+    {
+        return true;
     }
 
     @Override
@@ -474,15 +537,39 @@ public class TeradataClient
     @Override
     protected boolean isSupportedJoinCondition(ConnectorSession session, JdbcJoinCondition joinCondition)
     {
-        return joinCondition.getOperator() == Operator.IS_DISTINCT_FROM ? false : Stream.of(joinCondition.getLeftColumn(), joinCondition.getRightColumn()).map(JdbcColumnHandle::getColumnType).noneMatch((type) -> {
-            return type instanceof CharType || type instanceof VarcharType;
-        });
+        if (joinCondition.getOperator() == Operator.IS_DISTINCT_FROM) {
+            // Not supported in Teradata
+            return false;
+        }
+
+        return Stream.of(joinCondition.getLeftColumn(), joinCondition.getRightColumn())
+                .map(JdbcColumnHandle::getColumnType)
+                .noneMatch((type) -> type instanceof CharType || type instanceof VarcharType);
     }
 
     @Override
-    public boolean isTopNGuaranteed(ConnectorSession session)
+    public TableStatistics getTableStatistics(ConnectorSession session, JdbcTableHandle handle)
     {
-        return true;
+        if (!statisticsEnabled) {
+            return TableStatistics.empty();
+        }
+        if (!handle.isNamedRelation()) {
+            return TableStatistics.empty();
+        }
+        try {
+            return readTableStatistics(session, handle);
+        }
+        catch (SQLException | RuntimeException e) {
+            throwIfInstanceOf(e, TrinoException.class);
+            throw new TrinoException(JDBC_ERROR, "Failed fetching statistics for table: " + handle, e);
+        }
+    }
+
+    private TableStatistics readTableStatistics(ConnectorSession session, JdbcTableHandle table)
+            throws SQLException
+    {
+        checkArgument(table.isNamedRelation(), "Relation is not a table: %s, table");
+        return TableStatistics.empty();
     }
 
     private static class TeradataLongWriteFunction

@@ -19,6 +19,7 @@ import io.trino.plugin.jdbc.DefaultQueryBuilder;
 import io.trino.plugin.jdbc.JdbcClient;
 import io.trino.plugin.jdbc.JdbcColumnHandle;
 import io.trino.plugin.jdbc.JdbcExpression;
+import io.trino.plugin.jdbc.JdbcStatisticsConfig;
 import io.trino.plugin.jdbc.JdbcTypeHandle;
 import io.trino.plugin.jdbc.logging.RemoteQueryModifier;
 import io.trino.plugin.jdbc.mapping.DefaultIdentifierMapping;
@@ -60,7 +61,7 @@ public class TestTeradataClient
     private static final JdbcClient JDBC_CLIENT = new TeradataClient(
             new BaseJdbcConfig(),
             new TeradataConfig(),
-//            new JdbcStatisticsConfig(),       @TODO enable statistics?
+            new JdbcStatisticsConfig(),
             session -> {
                 throw new UnsupportedOperationException();
             },

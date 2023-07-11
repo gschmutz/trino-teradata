@@ -23,6 +23,8 @@ import io.trino.plugin.jdbc.ConnectionFactory;
 import io.trino.plugin.jdbc.DriverConnectionFactory;
 import io.trino.plugin.jdbc.ForBaseJdbc;
 import io.trino.plugin.jdbc.JdbcClient;
+import io.trino.plugin.jdbc.JdbcJoinPushdownSupportModule;
+import io.trino.plugin.jdbc.JdbcStatisticsConfig;
 import io.trino.plugin.jdbc.credential.CredentialProvider;
 
 import java.sql.DriverManager;
@@ -39,6 +41,8 @@ public class TeradataClientModule
     {
         binder.bind(JdbcClient.class).annotatedWith(ForBaseJdbc.class).to(TeradataClient.class).in(Scopes.SINGLETON);
         configBinder(binder).bindConfig(TeradataConfig.class);
+        configBinder(binder).bindConfig(JdbcStatisticsConfig.class);
+        install(new JdbcJoinPushdownSupportModule());
     }
 
     @Provides
