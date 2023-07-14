@@ -683,13 +683,21 @@ SELECT "cust_id", "income", "first_name", "last_name", "street_nbr" FROM "val"."
 
 ## Limit Queries
 
-### Trino
+**Trino** 
 
 ```
 SELECT cust_id, first_name, last_name, street_nbr, income 
 FROM teradata.val.customer  
 LIMIT 10;
 ```
+
+**Teradata**
+
+```sql
+SELECT TOP 10 * FROM (SELECT "cust_id", "income", "first_name", "last_name", "street_nbr" FROM "val"."customer") o
+```
+
+**Trino Execution Plan**
 
 ```
 Trino version: 414
@@ -710,28 +718,54 @@ Fragment 0 [SOURCE]
 ```
 
 
-### Teradata
-
-```sql
-SELECT TOP 10 * FROM (SELECT "cust_id", "income", "first_name", "last_name", "street_nbr" FROM "val"."customer") o
-```
 
 ## Top-N Queries
 
+**Trino** 
+
+```sql
+SELECT c.cust_id , c.first_name, c.last_name, c.street_nbr, c.income 
+FROM teradata.val.customer  c
+order by income desc
+limit 10
 ```
-SELECT cust_id, first_name, last_name, street_nbr, income 
-FROM teradata.val.customer  
-ORDER_BY income DESC 
-LIMIT 10;
+
+**Teradata** 
+
+```sql
+SELECT TOP 10 "cust_id", "income", "first_name", "last_name", "street_nbr" FROM "val"."customer" ORDER BY "income" DESC NULLS LAST
 ```
 
+**Trino Execution Plan**
 
-SELECT TOP 10 "cust_id", "income", "first_name", "last_name", "street_nbr" FROM "val"."customer" ORDER BY "income" ASC NULLS LAST
-
-
-SELECT "cust_id", "income", "first_name", "last_name", "street_nbr" FROM "val"."customer"
+```
+Trino version: 414
+Fragment 0 [SOURCE]
+    Output layout: [cust_id, first_name, last_name, street_nbr, income]
+    Output partitioning: SINGLE []
+    Output[columnNames = [cust_id, first_name, last_name, street_nbr, income]]
+    │   Layout: [cust_id:integer, first_name:char(30), last_name:char(30), street_nbr:smallint, income:integer]
+    │   Estimates: {rows: 10 (1.20kB), cpu: 0, memory: 0B, network: 0B}
+    └─ TableScan[table = teradata:val.customer val.customer sortOrder=[income:integer:INTEGER DESC NULLS LAST] limit=10 columns=[cust_id:integer:INTEGER, income:integer:INTEGER, first_name:char(30):CHAR, last_name:char(30):CHAR, street_nbr:smallint:SMALLINT]]
+           Layout: [cust_id:integer, income:integer, first_name:char(30), last_name:char(30), street_nbr:smallint]
+           Estimates: {rows: 10 (1.20kB), cpu: 1.20k, memory: 0B, network: 0B}
+           income := income:integer:INTEGER
+           street_nbr := street_nbr:smallint:SMALLINT
+           last_name := last_name:char(30):CHAR
+           cust_id := cust_id:integer:INTEGER
+           first_name := first_name:char(30):CHAR
+```
 
 ## Join Queries
+
+Join queries are pushed down if this configuration is set in the teradata catalog:
+
+```properties
+join-pushdown.enabled=true
+join-pushdown.strategy=EAGER
+```
+
+**Trino**
 
 ```sql
 SELECT cus.cust_id
@@ -745,47 +779,31 @@ LEFT JOIN teradata.val.accounts acc
 ON (cus.cust_id = acc.cust_id)
 ```
 
+**Teradata**
+
+```sql
+SELECT "last_name_2", "cust_id_0", "first_name_1", "acct_type_4", "ending_balance_6", "starting_balance_5" FROM (SELECT l."cust_id" AS "cust_id_0", l."first_name" AS "first_name_1", l."last_name" AS "
+```
+
+**Trino Execution Plan**
+
 ```
 Trino version: 414
-Fragment 0 [HASH]
-    Output layout: [cust_id, first_name, last_name, acct_type, account_active]
+Fragment 0 [SOURCE]
+    Output layout: [cust_id, first_name, last_name, acct_type, starting_balance, ending_balance]
     Output partitioning: SINGLE []
-    Output[columnNames = [cust_id, first_name, last_name, acct_type, account_active]]
-    │   Layout: [cust_id:integer, first_name:char(30), last_name:char(30), acct_type:char(2), account_active:char(1)]
+    Output[columnNames = [cust_id, first_name, last_name, acct_type, starting_balance, ending_balance]]
+    │   Layout: [cust_id:integer, first_name:char(30), last_name:char(30), acct_type:char(2), starting_balance:decimal(9,2), ending_balance:decimal(9,2)]
     │   Estimates: {rows: ? (?), cpu: 0, memory: 0B, network: 0B}
-    └─ LeftJoin[criteria = ("cust_id" = "cust_id_0"), hash = [$hashvalue, $hashvalue_2], distribution = PARTITIONED]
-       │   Layout: [cust_id:integer, first_name:char(30), last_name:char(30), acct_type:char(2), account_active:char(1)]
-       │   Estimates: {rows: ? (?), cpu: ?, memory: ?, network: 0B}
-       │   Distribution: PARTITIONED
-       ├─ RemoteSource[sourceFragmentIds = [1]]
-       │      Layout: [cust_id:integer, first_name:char(30), last_name:char(30), $hashvalue:bigint]
-       └─ LocalExchange[partitioning = HASH, hashColumn = [$hashvalue_2], arguments = ["cust_id_0"]]
-          │   Layout: [cust_id_0:integer, acct_type:char(2), account_active:char(1), $hashvalue_2:bigint]
-          │   Estimates: {rows: ? (?), cpu: ?, memory: 0B, network: 0B}
-          └─ RemoteSource[sourceFragmentIds = [2]]
-                 Layout: [cust_id_0:integer, acct_type:char(2), account_active:char(1), $hashvalue_3:bigint]
-
-Fragment 1 [SOURCE]
-    Output layout: [cust_id, first_name, last_name, $hashvalue_1]
-    Output partitioning: HASH [cust_id][$hashvalue_1]
-    ScanProject[table = teradata:val.customer val.customer columns=[cust_id:integer:INTEGER, first_name:char(30):CHAR, last_name:char(30):CHAR]]
-        Layout: [cust_id:integer, first_name:char(30), last_name:char(30), $hashvalue_1:bigint]
-        Estimates: {rows: ? (?), cpu: ?, memory: 0B, network: 0B}/{rows: ? (?), cpu: ?, memory: 0B, network: 0B}
-        $hashvalue_1 := combine_hash(bigint '0', COALESCE("$operator$hash_code"("cust_id"), 0))
-        last_name := last_name:char(30):CHAR
-        cust_id := cust_id:integer:INTEGER
-        first_name := first_name:char(30):CHAR
-
-Fragment 2 [SOURCE]
-    Output layout: [cust_id_0, acct_type, account_active, $hashvalue_4]
-    Output partitioning: HASH [cust_id_0][$hashvalue_4]
-    ScanProject[table = teradata:val.accounts val.accounts columns=[cust_id:integer:INTEGER, acct_type:char(2):CHAR, account_active:char(1):CHAR]]
-        Layout: [cust_id_0:integer, acct_type:char(2), account_active:char(1), $hashvalue_4:bigint]
-        Estimates: {rows: ? (?), cpu: ?, memory: 0B, network: 0B}/{rows: ? (?), cpu: ?, memory: 0B, network: 0B}
-        $hashvalue_4 := combine_hash(bigint '0', COALESCE("$operator$hash_code"("cust_id_0"), 0))
-        cust_id_0 := cust_id:integer:INTEGER
-        acct_type := acct_type:char(2):CHAR
-        account_active := account_active:char(1):CHAR
+    └─ TableScan[table = teradata:Query[SELECT l."cust_id" AS "cust_id_0", l."first_name" AS "first_name_1", l."last_name" AS "last_name_2", r."cust_id" AS "cust_id_3", r."acct_type" AS "acct_type_4", r."starting_balance" AS "starting_balance_5", r."ending_balance" AS "ending_balance_6" FROM (SELECT "cust_id", "first_name", "last_name" FROM "val"."customer") l LEFT JOIN (SELECT "cust_id", "acct_type", "starting_balance", "ending_balance" FROM "val"."accounts") r ON l."cust_id" = r."cust_id"] columns=[last_name_2:char(30):CHAR, cust_id_0:integer:INTEGER, first_name_1:char(30):CHAR, acct_type_4:char(2):CHAR, ending_balance_6:decimal(9,2):DECIMAL, starting_balance_5:decimal(9,2):DECIMAL]]
+           Layout: [last_name:char(30), cust_id:integer, first_name:char(30), acct_type:char(2), ending_balance:decimal(9,2), starting_balance:decimal(9,2)]
+           Estimates: {rows: ? (?), cpu: ?, memory: 0B, network: 0B}
+           acct_type := acct_type_4:char(2):CHAR
+           last_name := last_name_2:char(30):CHAR
+           ending_balance := ending_balance_6:decimal(9,2):DECIMAL
+           cust_id := cust_id_0:integer:INTEGER
+           first_name := first_name_1:char(30):CHAR
+           starting_balance := starting_balance_5:decimal(9,2):DECIMAL
 ```
 
 
