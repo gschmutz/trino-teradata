@@ -20,6 +20,7 @@ import com.google.inject.Singleton;
 import io.airlift.configuration.AbstractConfigurationAwareModule;
 import io.trino.plugin.jdbc.BaseJdbcConfig;
 import io.trino.plugin.jdbc.ConnectionFactory;
+import io.trino.plugin.jdbc.DecimalModule;
 import io.trino.plugin.jdbc.DriverConnectionFactory;
 import io.trino.plugin.jdbc.ForBaseJdbc;
 import io.trino.plugin.jdbc.JdbcClient;
@@ -42,6 +43,7 @@ public class TeradataClientModule
         binder.bind(JdbcClient.class).annotatedWith(ForBaseJdbc.class).to(TeradataClient.class).in(Scopes.SINGLETON);
         configBinder(binder).bindConfig(TeradataConfig.class);
         configBinder(binder).bindConfig(JdbcStatisticsConfig.class);
+        install(new DecimalModule());
         install(new JdbcJoinPushdownSupportModule());
     }
 

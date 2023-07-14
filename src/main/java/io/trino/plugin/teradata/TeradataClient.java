@@ -62,7 +62,6 @@ import io.trino.spi.statistics.TableStatistics;
 import io.trino.spi.type.CharType;
 import io.trino.spi.type.DecimalType;
 import io.trino.spi.type.Decimals;
-import io.trino.spi.type.TimestampType;
 import io.trino.spi.type.Type;
 import io.trino.spi.type.VarcharType;
 
@@ -94,7 +93,7 @@ import static io.trino.plugin.jdbc.StandardColumnMappings.bigintColumnMapping;
 import static io.trino.plugin.jdbc.StandardColumnMappings.bigintWriteFunction;
 import static io.trino.plugin.jdbc.StandardColumnMappings.charReadFunction;
 import static io.trino.plugin.jdbc.StandardColumnMappings.charWriteFunction;
-import static io.trino.plugin.jdbc.StandardColumnMappings.dateColumnMappingUsingLocalDate;
+import static io.trino.plugin.jdbc.StandardColumnMappings.dateColumnMappingUsingSqlDate;
 import static io.trino.plugin.jdbc.StandardColumnMappings.decimalColumnMapping;
 import static io.trino.plugin.jdbc.StandardColumnMappings.doubleColumnMapping;
 import static io.trino.plugin.jdbc.StandardColumnMappings.doubleWriteFunction;
@@ -104,6 +103,9 @@ import static io.trino.plugin.jdbc.StandardColumnMappings.realColumnMapping;
 import static io.trino.plugin.jdbc.StandardColumnMappings.realWriteFunction;
 import static io.trino.plugin.jdbc.StandardColumnMappings.smallintColumnMapping;
 import static io.trino.plugin.jdbc.StandardColumnMappings.smallintWriteFunction;
+import static io.trino.plugin.jdbc.StandardColumnMappings.timeColumnMappingUsingSqlTime;
+import static io.trino.plugin.jdbc.StandardColumnMappings.timestampColumnMappingUsingSqlTimestampWithRounding;
+import static io.trino.plugin.jdbc.StandardColumnMappings.tinyintColumnMapping;
 import static io.trino.plugin.jdbc.StandardColumnMappings.varcharReadFunction;
 import static io.trino.plugin.jdbc.StandardColumnMappings.varcharWriteFunction;
 import static io.trino.plugin.jdbc.TypeHandlingJdbcSessionProperties.getUnsupportedTypeHandling;
@@ -116,6 +118,7 @@ import static io.trino.spi.type.DoubleType.DOUBLE;
 import static io.trino.spi.type.IntegerType.INTEGER;
 import static io.trino.spi.type.RealType.REAL;
 import static io.trino.spi.type.SmallintType.SMALLINT;
+import static io.trino.spi.type.TimestampType.TIMESTAMP_MILLIS;
 import static io.trino.spi.type.VarcharType.createUnboundedVarcharType;
 import static io.trino.spi.type.VarcharType.createVarcharType;
 import static java.lang.Math.max;
@@ -172,56 +175,6 @@ public class TeradataClient
                         .add(new ImplementVariancePop())
                         .build());
     }
-
-    /*
-    @Override
-    public Map<String, Object> getTableProperties(ConnectorSession session, JdbcTableHandle tableHandle) {
-        try {
-            Connection connection = this.connectionFactory.openConnection(session);
-
-            Map var5;
-            try {
-                Handle handle = Jdbi.open(connection);
-
-                try {
-                    var5 = TeradataIndices.getTablePropertiesForIndices(tableHandle, handle);
-                } catch (Throwable var9) {
-                    if (handle != null) {
-                        try {
-                            handle.close();
-                        } catch (Throwable var8) {
-                            var9.addSuppressed(var8);
-                        }
-                    }
-
-                    throw var9;
-                }
-
-                if (handle != null) {
-                    handle.close();
-                }
-            } catch (Throwable var10) {
-                if (connection != null) {
-                    try {
-                        connection.close();
-                    } catch (Throwable var7) {
-                        var10.addSuppressed(var7);
-                    }
-                }
-
-                throw var10;
-            }
-
-            if (connection != null) {
-                connection.close();
-            }
-
-            return var5;
-        } catch (SQLException var11) {
-            throw new TrinoException(JdbcErrorCode.JDBC_ERROR, var11);
-        }
-    }
-    */
 
     @Override
     public Optional<String> getTableComment(ResultSet resultSet)
@@ -348,8 +301,18 @@ public class TeradataClient
 
         int decimalDigits;
         switch (typeHandle.getJdbcType()) {
-//            case Types.TINYINT:
-//                return Optional.of(new ColumnMapping(TinyintType.TINYINT, ResultSet::getByte, writeTypedNull(typeHandle.getJdbcType(), StandardColumnMappings.tinyintWriteFunction()), FULL_PUSHDOWN));
+            /*
+            case Types.BINARY:
+                return Optional.of(varbinaryColumnMapping());
+
+            case Types.BIT:
+                return Optional.of(booleanColumnMapping());
+            */
+            case Types.TINYINT:
+                return Optional.of(tinyintColumnMapping());
+
+            case Types.BOOLEAN:
+                return Optional.of(smallintColumnMapping());
 
             case Types.SMALLINT:
                 return Optional.of(smallintColumnMapping());
@@ -371,9 +334,11 @@ public class TeradataClient
                     break;
                 }
                 return Optional.of(decimalColumnMapping(createDecimalType(precision, max(decimalDigits, 0))));
+
             case Types.REAL:
                 return Optional.of(realColumnMapping());
 
+            case Types.FLOAT:
             case Types.DOUBLE:
                 return Optional.of(doubleColumnMapping());
 
@@ -383,15 +348,15 @@ public class TeradataClient
             case Types.VARCHAR:
                 return Optional.of(varcharColumnMapping(typeHandle.getRequiredColumnSize()));
 
-            case Types.DATE:
-                return Optional.of(dateColumnMappingUsingLocalDate());
+            case Types.DATE:    //91
+                return Optional.of(dateColumnMappingUsingSqlDate());
 
-            case Types.TIMESTAMP:
-                if (typeHandle.getJdbcTypeName().isPresent() && !((String) typeHandle.getJdbcTypeName().get()).contains("WITH TIME ZONE")) {
-                    decimalDigits = typeHandle.getRequiredDecimalDigits();
-                    TimestampType timestampType = TimestampType.createTimestampType(decimalDigits);
-                    //return Optional.of(timestampColumnMapping(timestampType));
-                }
+            case Types.TIME:
+                return Optional.of(timeColumnMappingUsingSqlTime());
+
+            case Types.TIMESTAMP: // 93
+                // TODO default to `timestampColumnMapping`
+                return Optional.of(timestampColumnMappingUsingSqlTimestampWithRounding(TIMESTAMP_MILLIS));
         }
 
         if (getUnsupportedTypeHandling(session) == CONVERT_TO_VARCHAR) {
