@@ -33,6 +33,7 @@ import io.trino.plugin.jdbc.JdbcTypeHandle;
 import io.trino.plugin.jdbc.LongWriteFunction;
 import io.trino.plugin.jdbc.PreparedQuery;
 import io.trino.plugin.jdbc.QueryBuilder;
+import io.trino.plugin.jdbc.StandardColumnMappings;
 import io.trino.plugin.jdbc.WriteMapping;
 import io.trino.plugin.jdbc.aggregation.ImplementAvgDecimal;
 import io.trino.plugin.jdbc.aggregation.ImplementAvgFloatingPoint;
@@ -62,6 +63,7 @@ import io.trino.spi.statistics.TableStatistics;
 import io.trino.spi.type.CharType;
 import io.trino.spi.type.DecimalType;
 import io.trino.spi.type.Decimals;
+import io.trino.spi.type.TimestampType;
 import io.trino.spi.type.Type;
 import io.trino.spi.type.VarcharType;
 
@@ -71,6 +73,7 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.sql.Timestamp;
 import java.sql.Types;
 import java.util.List;
 import java.util.Map;
@@ -104,7 +107,7 @@ import static io.trino.plugin.jdbc.StandardColumnMappings.realWriteFunction;
 import static io.trino.plugin.jdbc.StandardColumnMappings.smallintColumnMapping;
 import static io.trino.plugin.jdbc.StandardColumnMappings.smallintWriteFunction;
 import static io.trino.plugin.jdbc.StandardColumnMappings.timeColumnMappingUsingSqlTime;
-import static io.trino.plugin.jdbc.StandardColumnMappings.timestampColumnMappingUsingSqlTimestampWithRounding;
+import static io.trino.plugin.jdbc.StandardColumnMappings.timestampWriteFunctionUsingSqlTimestamp;
 import static io.trino.plugin.jdbc.StandardColumnMappings.tinyintColumnMapping;
 import static io.trino.plugin.jdbc.StandardColumnMappings.varcharReadFunction;
 import static io.trino.plugin.jdbc.StandardColumnMappings.varcharWriteFunction;
@@ -118,7 +121,6 @@ import static io.trino.spi.type.DoubleType.DOUBLE;
 import static io.trino.spi.type.IntegerType.INTEGER;
 import static io.trino.spi.type.RealType.REAL;
 import static io.trino.spi.type.SmallintType.SMALLINT;
-import static io.trino.spi.type.TimestampType.TIMESTAMP_MILLIS;
 import static io.trino.spi.type.VarcharType.createUnboundedVarcharType;
 import static io.trino.spi.type.VarcharType.createVarcharType;
 import static java.lang.Math.max;
@@ -355,8 +357,9 @@ public class TeradataClient
                 return Optional.of(timeColumnMappingUsingSqlTime());
 
             case Types.TIMESTAMP: // 93
-                // TODO default to `timestampColumnMapping`
-                return Optional.of(timestampColumnMappingUsingSqlTimestampWithRounding(TIMESTAMP_MILLIS));
+                decimalDigits = typeHandle.getRequiredDecimalDigits();
+                TimestampType timestampType = TimestampType.createTimestampType(decimalDigits);
+                return Optional.of(timestampColumnMapping(timestampType));
         }
 
         if (getUnsupportedTypeHandling(session) == CONVERT_TO_VARCHAR) {
@@ -429,16 +432,16 @@ public class TeradataClient
                 FULL_PUSHDOWN);
     }
 
-    /*
     public static ColumnMapping timestampColumnMapping(TimestampType type)
     {
-        LongWriteFunction writeFunction = writeTypedNull(Types.TIMESTAMP, (LongWriteFunction) StandardColumnMappings.timestampWriteFunctionUsingSqlTimestamp(type));
-        return new ColumnMapping(type, (resultSet, columnIndex) -> {
-            Timestamp timestamp = resultSet.getTimestamp(columnIndex);
-            return StandardColumnMappings.toTrinoTimestamp(type, timestamp.toLocalDateTime());
-        }, writeFunction, FULL_PUSHDOWN);
+        LongWriteFunction writeFunction = writeTypedNull(Types.TIMESTAMP, (LongWriteFunction) timestampWriteFunctionUsingSqlTimestamp(type));
+
+        return ColumnMapping.longMapping(type,
+                (resultSet, columnIndex) -> {
+                    Timestamp timestamp = resultSet.getTimestamp(columnIndex);
+                    return StandardColumnMappings.toTrinoTimestamp(type, timestamp.toLocalDateTime());
+                }, writeFunction, FULL_PUSHDOWN);
     }
-    */
 
     private static LongWriteFunction writeTypedNull(int type, LongWriteFunction delegate)
     {
