@@ -229,19 +229,6 @@ public class TeradataClient
         return Optional.of(new JdbcTypeHandle(Types.NUMERIC, Optional.of("decimal"), Optional.of(decimalType.getPrecision()), Optional.of(decimalType.getScale()), Optional.empty(), Optional.empty()));
     }
 
-    private static Optional<String> asLongDecimal(JdbcExpression jdbcExpression)
-    {
-        JdbcTypeHandle jdbcTypeHandle = jdbcExpression.getJdbcTypeHandle();
-        if (jdbcTypeHandle.getJdbcType() != 2) {
-            return Optional.empty();
-        }
-        else {
-            verify(jdbcTypeHandle.getRequiredColumnSize() == 38, "Expected long decimal, but column size is: %s", jdbcTypeHandle.getRequiredColumnSize());
-            int decimalDigits = jdbcTypeHandle.getRequiredDecimalDigits();
-            return Optional.of(String.format("decimal(38, %s)", decimalDigits));
-        }
-    }
-
     @Override
     protected boolean filterSchema(String schemaName)
     {
