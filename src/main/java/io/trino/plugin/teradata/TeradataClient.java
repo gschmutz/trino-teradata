@@ -145,14 +145,12 @@ public class TeradataClient
     public TeradataClient(
             BaseJdbcConfig config,
             JdbcStatisticsConfig statisticsConfig,
-            TeradataConfig teradataConfig,
             ConnectionFactory connectionFactory,
             QueryBuilder queryBuilder,
             IdentifierMapping identifierMapping,
             RemoteQueryModifier remoteQueryModifier)
     {
         super("\"", connectionFactory, queryBuilder, config.getJdbcTypesMappedToVarchar(), identifierMapping, remoteQueryModifier, true);
-        requireNonNull(teradataConfig, "teradataConfig is null");
         this.statisticsEnabled = statisticsConfig.isEnabled();
 
         JdbcTypeHandle bigintTypeHandle = new JdbcTypeHandle(Types.BIGINT, Optional.of("bigint"), Optional.empty(), Optional.empty(), Optional.empty(), Optional.empty());

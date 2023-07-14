@@ -41,7 +41,6 @@ public class TeradataClientModule
     public void setup(Binder binder)
     {
         binder.bind(JdbcClient.class).annotatedWith(ForBaseJdbc.class).to(TeradataClient.class).in(Scopes.SINGLETON);
-        configBinder(binder).bindConfig(TeradataConfig.class);
         configBinder(binder).bindConfig(JdbcStatisticsConfig.class);
         install(new DecimalModule());
         install(new JdbcJoinPushdownSupportModule());
