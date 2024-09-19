@@ -311,6 +311,7 @@ public class TeradataClient
                 return Optional.of(bigintColumnMapping());
 
             case Types.DECIMAL:
+            case Types.NUMERIC:
                 int precision = typeHandle.getRequiredColumnSize();
                 decimalDigits = typeHandle.getRequiredDecimalDigits();
                 if (getDecimalRounding(session) == ALLOW_OVERFLOW && precision > Decimals.MAX_PRECISION) {
@@ -330,9 +331,13 @@ public class TeradataClient
                 return Optional.of(doubleColumnMapping());
 
             case Types.CHAR:
+            case Types.NCHAR:
                 return Optional.of(charColumnMapping(typeHandle.getRequiredColumnSize()));
 
             case Types.VARCHAR:
+            case Types.NVARCHAR:
+            case Types.LONGVARCHAR:
+            case Types.LONGNVARCHAR:
                 return Optional.of(varcharColumnMapping(typeHandle.getRequiredColumnSize()));
 
             case Types.DATE:    //91

@@ -53,6 +53,7 @@ public class TeradataClientModule
             throws SQLException
     {
         Properties connectionProperties = new Properties();
+        connectionProperties.setProperty("CHARSET", "UTF8");
         return new DriverConnectionFactory(DriverManager.getDriver(config.getConnectionUrl()), config.getConnectionUrl(), connectionProperties, credentialProvider);
     }
 }
